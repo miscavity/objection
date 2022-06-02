@@ -136,6 +136,11 @@ COMMANDS = {
                 'dynamic': filemanager.list_files_in_current_fm_directory,
                 'exec': filemanager.download
             },
+            'recursive_download': {
+                'meta': 'Download a folder',
+                'dynamic': filemanager.list_files_in_current_fm_directory,
+                'exec': filemanager.download_folder
+            },
 
             # http file server
 

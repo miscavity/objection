@@ -245,6 +245,117 @@ def ls(args: list) -> None:
     if device_state.platform == Android:
         _ls_android(path)
 
+def _ls_ios_down(path: str,destination: str) -> None:
+    """
+        List files implementation for iOS.
+
+        See:
+            http://www.stanford.edu/class/cs193p/cgi-bin/drupal/system/files/lectures/09_Data.pdf
+
+        :param path:
+        :return:
+    """
+
+    api = state_connection.get_api()
+    data = api.ios_file_ls(path)
+
+    def _get_key_if_exists(attribs, key):
+        """
+            Small helper to grab keys where some may or may
+            not exist in the file attributes.
+
+            :param attribs:
+            :param key:
+            :return:
+        """
+
+        if key in attribs:
+            return attribs[key]
+
+        return 'n/a'
+
+
+    # if the directory was readable, dump the filesystem listing
+    # and attributes to screen.
+    click.secho(tabulate(
+        [[
+            _get_key_if_exists(file_data['attributes'], 'NSFileType').replace('NSFileType', ''),
+
+            file_name,
+
+        ] for file_name, file_data in data['files'].items()], headers=[
+            'NSFileType', 'Name'
+        ],
+    )) if data['readable'] else None
+
+    # handle the permissions summary for this directory
+    click.secho('\nReadable: {0}  Writable: {1}'.format(data['readable'], data['writable']), bold=True)
+    for file_name, file_data in data['files'].items():
+      if(_get_key_if_exists(file_data['attributes'], 'NSFileType').replace('NSFileType', '')=='Directory'):
+	      click.secho('Path:{0}\n filename:{1}\n'.format(path,file_name))
+      if( 'FridaGadget.dylib' in file_name):
+        click.secho('skipping FridaGadget\n')
+      else:
+        new_path='{0}/{1}'.format(path,file_name)
+        new_destination='{0}/{1}'.format(destination,file_name) 
+        click.secho('new_path:{0}\nnew_dest{1}'.format(new_path,new_destination))
+        _download_ios_folder(new_path,new_destination)
+
+
+
+def _ls_android_down(path: str,destination: str) -> None:
+    """
+        Lit files implementation for Android devices.
+
+        :param path:
+        :return:
+    """
+
+    api = state_connection.get_api()
+    data = api.android_file_ls(path)
+
+    def _timestamp_to_str(stamp: str) -> str:
+        """
+            Small helper method to convert the timestamps we get
+            from the Android filesystem to human readable ones.
+
+            :param stamp:
+            :return:
+        """
+
+        # convert the time to an integer
+        stamp = int(stamp)
+
+        if stamp > 0:
+            return time.strftime('%Y-%m-%d %H:%M:%S GMT', time.gmtime(stamp / 1000.0))
+
+        return 'n/a'
+
+    click.secho(tabulate(
+        [[
+            'Directory' if file_data['attributes']['isDirectory'] else 'File',
+
+            
+            file_name,
+
+        ] for file_name, file_data in data['files'].items()], headers=[
+            'Type',  'Name'
+        ],
+    )) if data['readable'] else None
+
+    click.secho('\nReadable: {0}  Writable: {1}'.format(data['readable'], data['writable']), bold=True)
+    for file_name, file_data in data['files'].items():
+      if file_data['attributes']['isDirectory']):
+	      click.secho('Path:{0}\n filename:{1}\n'.format(path,file_name))
+      if( 'FridaGadget.dylib' in file_name):
+        click.secho('skipping FridaGadget\n')
+      else:
+        new_path='{0}/{1}'.format(path,file_name)
+        new_destination='{0}/{1}'.format(destination,file_name) 
+        click.secho('new_path:{0}\nnew_dest{1}'.format(new_path,new_destination))
+        _download_android_folder(new_path,new_destination)
+
+
 
 def _ls_ios(path: str) -> None:
     """
@@ -369,6 +480,115 @@ def _ls_android(path: str) -> None:
     )) if data['readable'] else None
 
     click.secho('\nReadable: {0}  Writable: {1}'.format(data['readable'], data['writable']), bold=True)
+
+
+def download_folder(args: list) -> None:
+    """
+        Downloads a folder_recursivly  from a remote filesystem and stores
+        it locally.
+
+        This method is simply a proxy to the actual download methods
+        used for the appropriate environment.
+
+        :param args:
+        :return:
+    """
+
+    if len(args) < 1:
+        click.secho('Usage: file download_folder <remote location> (optional: <local destination>)', bold=True)
+        return
+
+    # determine the source and destination file names.
+    # if we didnt get a specification of where to dump the file,
+    # assume the same name should be used locally.
+    source = args[0]
+    destination = args[1] if len(args) > 1 else os.path.basename(source)
+
+    if device_state.platform == Ios:
+        _download_ios_folder(source, destination)
+
+    if device_state.platform == Android:
+        _download_android_folder(source, destination)
+
+
+def _download_ios_folder(path: str, destination: str) -> None:
+    """
+        Download a file from an iOS filesystem and store it locally.
+
+        :param path:
+        :param destination:
+        :return:
+    """
+
+    # if the path we got is not absolute, join it with the
+    # current working directory
+    if not os.path.isabs(path):
+        path = device_state.platform.path_separator.join([pwd(), path])
+
+    api = state_connection.get_api()
+
+    click.secho('Downloading {0} to {1}'.format(path, destination), fg='green', dim=True)
+
+    if not api.ios_file_readable(path):
+        click.secho('Unable to download file. File is not readable.', fg='red')
+        return
+
+    if not api.ios_file_path_is_file(path):
+        click.secho('Unable to download file. Target path is ia folder .', fg='yellow')
+        doesExist=os.path.exists(destination)
+        if not  doesExist:
+          os.makedirs(destination)
+        mydat=_ls_ios_down(path,destination)
+        return
+
+    click.secho('Streaming file from device...', dim=True)
+    file_data = api.ios_file_download(path)
+
+    click.secho('Writing bytes to destination...', dim=True)
+    with open(destination, 'wb') as fh:
+        fh.write(bytearray(file_data['data']))
+
+    click.secho('Successfully downloaded {0} to {1}'.format(path, destination), bold=True)
+
+def _download_android_folder(path: str, destination: str) -> None:
+    """
+        Download a file from the Android filesystem and store it locally.
+
+        :param path:
+        :param destination:
+        :return:
+    """
+
+    # if the path we got is not absolute, join it with the
+    # current working directory
+    if not os.path.isabs(path):
+        path = device_state.platform.path_separator.join([pwd(), path])
+
+    api = state_connection.get_api()
+
+    click.secho('Downloading {0} to {1}'.format(path, destination), fg='green', dim=True)
+
+    if not api.android_file_readable(path):
+        click.secho('Unable to download file. Target path is not readable.', fg='red')
+        return
+
+    if not api.android_file_path_is_file(path):
+        click.secho('Unable to download file. Target path is a folder .', fg='yellow')
+        doesExist=os.path.exists(destination)
+        if not  doesExist:
+          os.makedirs(destination)
+        mydat=_ls_android_down(path,destination)
+
+        return
+
+    click.secho('Streaming file from device...', dim=True)
+    file_data = api.android_file_download(path)
+
+    click.secho('Writing bytes to destination...', dim=True)
+    with open(destination, 'wb') as fh:
+        fh.write(bytearray(file_data['data']))
+
+    click.secho('Successfully downloaded {0} to {1}'.format(path, destination), bold=True)
 
 
 def download(args: list) -> None:
