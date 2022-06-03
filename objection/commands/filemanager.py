@@ -345,7 +345,7 @@ def _ls_android_down(path: str,destination: str) -> None:
 
     click.secho('\nReadable: {0}  Writable: {1}'.format(data['readable'], data['writable']), bold=True)
     for file_name, file_data in data['files'].items():
-      if file_data['attributes']['isDirectory']):
+      if (file_data['attributes']['isDirectory']):
 	      click.secho('Path:{0}\n filename:{1}\n'.format(path,file_name))
       if( 'FridaGadget.dylib' in file_name):
         click.secho('skipping FridaGadget\n')
